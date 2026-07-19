@@ -1,0 +1,110 @@
+from __future__ import annotations
+
+import argparse
+import json
+import tempfile
+import time
+from pathlib import Path
+
+import torch
+
+from .format import CacheSpec
+from .pipeline import KVSSDPipeline
+from .store import KVCacheStore
+
+
+def _create_demo(args: argparse.Namespace) -> None:
+    generator = torch.Generator().manual_seed(args.seed)
+    shape = (args.layers, args.tokens, args.kv_heads, args.head_dim)
+    keys = torch.randn(shape, generator=generator, dtype=torch.float16)
+    values = torch.randn(shape, generator=generator, dtype=torch.float16)
+    spec = CacheSpec(
+        args.layers, args.kv_heads, args.head_dim, args.block_tokens, args.bits, args.group_size
+    )
+    store = KVCacheStore.create(args.output, keys, values, spec)
+    logical = 2 * keys.numel() * keys.element_size()
+    physical = (Path(args.output) / "blocks.kvssd").stat().st_size
+    print(json.dumps({
+        "path": str(Path(args.output).resolve()),
+        "logical_bytes": logical,
+        "physical_bytes": physical,
+        "effective_ratio": logical / physical,
+        "records": len(store.manifest.entries),
+    }, indent=2))
+
+
+def _inspect(args: argparse.Namespace) -> None:
+    with KVCacheStore.open(args.path) as store:
+        print(json.dumps({
+            "spec": store.manifest.spec.__dict__,
+            "records": len(store.manifest.entries),
+            "data_bytes": (Path(args.path) / "blocks.kvssd").stat().st_size,
+        }, indent=2))
+
+
+def _benchmark(args: argparse.Namespace) -> None:
+    device = "cuda" if torch.cuda.is_available() and not args.cpu else "cpu"
+    with tempfile.TemporaryDirectory() as tmp:
+        spec = CacheSpec(1, args.kv_heads, args.head_dim, args.block_tokens, args.bits, args.group_size)
+        shape = (1, args.tokens, args.kv_heads, args.head_dim)
+        keys, values = torch.randn(shape, dtype=torch.float16), torch.randn(shape, dtype=torch.float16)
+        store = KVCacheStore.create(tmp, keys, values, spec)
+        query = torch.randn(args.query_heads, args.head_dim, dtype=torch.float16)
+        with KVSSDPipeline(store, device=device, require_cuda_kernel=args.require_cuda) as pipeline:
+            for _ in range(args.warmup):
+                pipeline.decode(query, 0)
+            if device == "cuda":
+                torch.cuda.synchronize()
+            start = time.perf_counter()
+            for _ in range(args.iterations):
+                pipeline.decode(query, 0)
+            if device == "cuda":
+                torch.cuda.synchronize()
+            elapsed = time.perf_counter() - start
+        store.close()
+        size = (Path(tmp) / "blocks.kvssd").stat().st_size
+        print(json.dumps({
+            "device": device,
+            "iterations": args.iterations,
+            "mean_ms": elapsed * 1e3 / args.iterations,
+            "ssd_payload_mib": size / 2**20,
+            "effective_read_gib_s": size * args.iterations / elapsed / 2**30,
+        }, indent=2))
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(prog="kvssd")
+    sub = parser.add_subparsers(required=True)
+    create = sub.add_parser("create-demo", help="write a deterministic synthetic KV store")
+    create.add_argument("output")
+    create.add_argument("--layers", type=int, default=2)
+    create.add_argument("--tokens", type=int, default=1024)
+    create.add_argument("--kv-heads", type=int, default=8)
+    create.add_argument("--head-dim", type=int, default=128)
+    create.add_argument("--block-tokens", type=int, default=128)
+    create.add_argument("--bits", type=int, choices=(2, 4), default=4)
+    create.add_argument("--group-size", type=int, default=32)
+    create.add_argument("--seed", type=int, default=7)
+    create.set_defaults(func=_create_demo)
+    inspect = sub.add_parser("inspect", help="inspect a store manifest")
+    inspect.add_argument("path")
+    inspect.set_defaults(func=_inspect)
+    bench = sub.add_parser("benchmark", help="run the complete store-to-attention path")
+    bench.add_argument("--tokens", type=int, default=8192)
+    bench.add_argument("--kv-heads", type=int, default=8)
+    bench.add_argument("--query-heads", type=int, default=32)
+    bench.add_argument("--head-dim", type=int, default=128)
+    bench.add_argument("--block-tokens", type=int, default=128)
+    bench.add_argument("--bits", type=int, choices=(2, 4), default=4)
+    bench.add_argument("--group-size", type=int, default=32)
+    bench.add_argument("--warmup", type=int, default=2)
+    bench.add_argument("--iterations", type=int, default=10)
+    bench.add_argument("--cpu", action="store_true")
+    bench.add_argument("--require-cuda", action="store_true")
+    bench.set_defaults(func=_benchmark)
+    args = parser.parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

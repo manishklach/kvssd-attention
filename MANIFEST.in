@@ -1,0 +1,3 @@
+include README.md LICENSE CONTRIBUTING.md
+recursive-include csrc *.cpp *.cu
+recursive-include docs *.md
