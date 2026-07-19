@@ -5,6 +5,21 @@ on:
   pull_request:
 jobs:
   cpu:
+    strategy:
+      matrix:
+        python: ["3.10", "3.12"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install --index-url https://download.pytorch.org/whl/cpu torch
+      - run: pip install -e '.[dev]'
+      - run: ruff check src tests
+      - run: pytest
+      - run: pip wheel . --no-deps --wheel-dir dist
+  triton-interpreter:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -12,7 +27,19 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install --index-url https://download.pytorch.org/whl/cpu torch
-      - run: pip install -e '.[dev]'
-      - run: ruff check src tests
-      - run: pytest
-      - run: pip wheel . --no-deps --wheel-dir dist
+      - run: pip install -e '.[dev,triton]'
+      - run: TRITON_INTERPRET=1 pytest -m triton_interpreter
+  vllm-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: vllm-project/vllm
+          ref: v0.25.0
+          path: .vendor/vllm
+          sparse-checkout: vllm/v1/kv_offload
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python scripts/check_vllm_contract.py .vendor/vllm

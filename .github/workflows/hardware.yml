@@ -1,0 +1,19 @@
+name: hardware-validation
+on:
+  workflow_dispatch:
+jobs:
+  nvidia-gds:
+    runs-on: [self-hosted, linux, x64, nvidia-gds]
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install -e '.[dev,triton]' --no-build-isolation
+        env:
+          KVSSD_BUILD_CUDA: "1"
+          KVSSD_BUILD_GDS: "1"
+      - run: KVSSD_RUN_GPU_TESTS=1 KVSSD_RUN_GDS_TESTS=1 pytest -m 'gpu_hardware or gds_hardware'
+  amd-rocm:
+    runs-on: [self-hosted, linux, x64, amd-rocm]
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install -e '.[dev,triton]'
+      - run: KVSSD_RUN_GPU_TESTS=1 pytest -m gpu_hardware

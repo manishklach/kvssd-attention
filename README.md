@@ -10,9 +10,8 @@ KVSSD Attention is a reference implementation of this serving path:
 ```text
 2-bit or 4-bit KV blocks on NVMe
   → bounded asynchronous reads
-  → pinned host staging
-  → non-blocking CUDA-stream transfers
-  → fused register-level dequantization and decode attention
+  → GDS direct-to-GPU or aligned/pinned fallback staging
+  → fused Triton or CUDA register-level dequantization and decode attention
 ```
 
 The project is deliberately narrow. It implements single-query-token decode attention, including
@@ -32,22 +31,25 @@ storage to the GPU, and the CUDA kernel reconstructs individual values only when
 
 ## Project status
 
-`v0.1.1` is an engineering reference release. The portable correctness suite, storage lifecycle,
-packaging, and CPU end-to-end path are verified. The CUDA implementation is included and fails closed
-when unavailable, but its numerical and performance validation requires a real NVIDIA GPU. No GPU
-throughput claims are made from the AMD-only development host.
+The `v0.2` branch is an adoption-focused expansion of the original reference release. Portable CPU,
+Linux `O_DIRECT`, Triton-interpreter, and vLLM source-contract paths are validated in CI. Physical
+NVIDIA, NVIDIA GDS, and AMD/ROCm tests are isolated in an opt-in hardware workflow; no hardware path
+or performance result is claimed until its job has passed on the named machine.
 
 ## What is implemented
 
 - Symmetric groupwise INT2 and INT4 quantization with FP16 scales.
 - Fixed-size, 4 KiB-aligned, append-only SSD records with per-record CRC32.
 - Pluggable block selection (`AllBlocks` and sink-plus-recent are included).
-- Bounded threaded `preadv` loading, with a portable Windows fallback.
+- Observable storage selection: cuFile GDS → Linux `O_DIRECT` → buffered `preadv`.
+- Aligned CUDA and host allocators, bounded asynchronous loading, and explicit short-read diagnostics.
 - Pinned, coalesced staging buffers and dedicated CUDA transfer/compute streams.
 - Chunked H2D/compute overlap with numerically correct online-softmax result merging.
-- A fused CUDA kernel that unpacks and dequantizes K/V in registers and never writes a full
+- Fused CUDA and portable Triton kernels that unpack and dequantize K/V in registers and never write a full
   decompressed KV cache to HBM.
-- CPU reference implementation, CLI, tests, benchmark command, and CI.
+- A vLLM 0.25 custom secondary tier that asynchronously stores INT2/INT4 prefix blocks using stable
+  hash/group identifiers and reloads through vLLM's CPU primary tier.
+- CPU reference implementation, capability-aware CLI, reproducible benchmark JSON, and CI.
 
 ## Quick start
 
@@ -74,6 +76,26 @@ kvssd benchmark --tokens 131072 --bits 4 --require-cuda
 ```
 
 Use the PyTorch CUDA wheel/index appropriate for your driver; `cu128` above is only an example.
+
+Triton is optional and supports NVIDIA CUDA or AMD ROCm through the same kernel:
+
+```bash
+pip install -e '.[triton]'
+kvssd benchmark --attention-backend triton --tokens 131072 --bits 4
+```
+
+GPUDirect Storage additionally requires Linux, NVIDIA CUDA/GDS, `libcufile` headers and library, a
+GDS-capable filesystem, and aligned records. Explicit selection fails closed; `auto` safely falls
+through to `O_DIRECT` or buffered reads:
+
+```bash
+KVSSD_BUILD_GDS=1 pip install -e . --no-build-isolation
+kvssd inspect /mnt/nvme/demo-kv --storage-backend gds
+kvssd benchmark --storage-backend gds --attention-backend triton
+```
+
+See [docs/gds.md](docs/gds.md) for setup and diagnostics and
+[docs/vllm.md](docs/vllm.md) for the vLLM proof-of-concept configuration.
 
 ## Python example
 
@@ -107,9 +129,9 @@ directly as prefill produces them rather than assembling a full in-memory tensor
 
 ```mermaid
 flowchart LR
-    S["NVMe: aligned packed records"] -->|"preadv workers"| R["Reusable read slots"]
-    R -->|"validate CRC + select"| P["Pinned coalescing buffer"]
-    P -->|"cudaMemcpyAsync"| G["Packed KV in HBM"]
+    S["NVMe: aligned packed records"] -->|"cuFile"| G["Packed KV in HBM"]
+    S -->|"O_DIRECT / preadv"| R["Reusable host read slots"]
+    R -->|"cudaMemcpyAsync"| G
     G --> K["Fused INT2/INT4 decode kernel"]
     Q["Query heads"] --> K
     K --> M["Online-softmax chunk merge"]
@@ -132,7 +154,9 @@ the attention matrix.
 | Head dimension | Up to 256, divisible by group size |
 | Attention | MHA, MQA, or GQA |
 | Record alignment | 4096 bytes |
-| CUDA query dtype | FP16, BF16, or FP32 |
+| Query dtype | FP16, BF16, or FP32 |
+| Triton devices | NVIDIA CUDA or AMD ROCm on Linux |
+| Storage selection | GDS, `O_DIRECT`, buffered |
 
 ## Performance interpretation
 
@@ -153,13 +177,15 @@ bandwidth. See [docs/benchmarking.md](docs/benchmarking.md) for the benchmark pr
 - The CUDA kernel favors clarity and auditability over architecture-specific tensor-core tuning.
 - The included selectors do not implement semantic top-k retrieval. The selector interface is the
   intended integration point for block centroids, retrieval heads, or an external scheduler.
-- The default backend uses buffered `preadv`; direct I/O and GPUDirect Storage are future backends.
+- vLLM's public secondary-tier contract stages through its CPU primary tier. It validates persistent
+  packed prefix reuse, but it does not replace vLLM PagedAttention with KVSSD fused attention.
+- cuFile support is an optional source build and requires a self-hosted GDS runner for validation.
 - Quantization quality must be evaluated on the target model and task. INT2 is not automatically safe.
 - Windows can run the CPU tests, but the production CUDA/SSD target is Linux.
 
-These constraints are explicit so benchmark results cannot silently compare the reference fallback
-against the fused path. `require_cuda_kernel=True` and `--require-cuda` fail closed when the extension
-is absent.
+These constraints are explicit so benchmark results cannot silently compare a fallback against a
+requested fast path. Explicit `--attention-backend`, `--storage-backend`, and `--require-cuda`
+selections fail closed; benchmark JSON records both selected capability reports and runtime versions.
 
 ## License
 
@@ -167,3 +193,6 @@ Apache-2.0.
 
 See [CHANGELOG.md](CHANGELOG.md) for release history and
 [CONTRIBUTING.md](CONTRIBUTING.md) for validation requirements.
+
+The prioritized post-v0.1 architecture and hardware-gated acceptance criteria are documented in
+[docs/v0.2-design.md](docs/v0.2-design.md).

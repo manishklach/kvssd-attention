@@ -17,4 +17,3 @@ def test_quantization_round_trip(bits: int, max_mae: float) -> None:
 def test_rejects_invalid_layout() -> None:
     with pytest.raises(ValueError, match="divisible"):
         quantize_tensor(torch.randn(2, 31), 4, group_size=16)
-

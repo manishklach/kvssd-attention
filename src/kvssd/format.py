@@ -114,8 +114,18 @@ def encode_record(block: PackedKVBlock, spec: CacheSpec) -> tuple[bytes, int]:
     payload = b"".join(chunks)
     crc = zlib.crc32(payload)
     header = HEADER.pack(
-        MAGIC, 1, block.layer, block.block, block.valid_tokens, spec.bits,
-        spec.block_tokens, spec.kv_heads, spec.head_dim, spec.group_size, len(payload), crc,
+        MAGIC,
+        1,
+        block.layer,
+        block.block,
+        block.valid_tokens,
+        spec.bits,
+        spec.block_tokens,
+        spec.kv_heads,
+        spec.head_dim,
+        spec.group_size,
+        len(payload),
+        crc,
     )
     record = header + payload
     return record + bytes(spec.record_bytes - len(record)), crc
@@ -130,7 +140,11 @@ def decode_record(raw: torch.Tensor, spec: CacheSpec, verify_crc: bool = True) -
     if magic != MAGIC or version != 1:
         raise ValueError("invalid KVSSD record header")
     if (bits, bt, heads, dim, group) != (
-        spec.bits, spec.block_tokens, spec.kv_heads, spec.head_dim, spec.group_size
+        spec.bits,
+        spec.block_tokens,
+        spec.kv_heads,
+        spec.head_dim,
+        spec.group_size,
     ):
         raise ValueError("record layout does not match manifest")
     payload = view[HEADER.size : HEADER.size + payload_len]
@@ -161,4 +175,3 @@ def decode_record(raw: torch.Tensor, spec: CacheSpec, verify_crc: bool = True) -
         key=QuantizedTensor(kp, ks, shape, spec.bits, spec.group_size),
         value=QuantizedTensor(vp, vs, shape, spec.bits, spec.group_size),
     )
-
