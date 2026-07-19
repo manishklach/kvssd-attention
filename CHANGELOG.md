@@ -2,6 +2,28 @@
 
 All notable project changes are documented here. The project follows Semantic Versioning.
 
+## [Unreleased]
+
+### Added
+
+- Backend contracts and fail-closed selection for reference, CUDA-extension, and Triton attention.
+- A fused Triton INT2/INT4 decode kernel covering NVIDIA CUDA and AMD ROCm, with CPU interpreter
+  validation for MHA, MQA, GQA, partial blocks, three head dimensions, and exact chunk merging.
+- Storage contracts with automatic GDS → Linux `O_DIRECT` → buffered fallback and structured
+  capability diagnostics.
+- Optional `libcufile` extension for aligned whole-record reads directly into CUDA memory.
+- vLLM 0.25 `TieringOffloadingSpec` integration with asynchronous packed prefix storage, stable
+  hash/group mapping, atomic records, configuration isolation, and CRC-checked reloads.
+- Self-describing benchmark JSON, a matrix runner, source-contract CI for vLLM 0.25, hosted cuFile
+  extension compilation, and opt-in NVIDIA GDS and AMD ROCm hardware workflows.
+
+### Validation
+
+- Portable Windows suite, Linux `O_DIRECT` end-to-end read, Triton interpreter matrix, and exact
+  vLLM 0.25 source contract pass.
+- Physical CUDA, GDS, and ROCm jobs remain release gates; no v0.2 release or performance claim has
+  been published yet.
+
 ## [0.1.1] - 2026-07-19
 
 ### Fixed

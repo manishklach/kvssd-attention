@@ -6,11 +6,10 @@ from collections.abc import Iterator, Sequence
 import torch
 
 from .attention import (
-    cuda_extension_available,
-    fused_attention_tensors,
     merge_attention_chunks,
     packed_attention,
 )
+from .backends import AttentionBackend, PackedBatch, resolve_attention_backend
 from .format import PackedKVBlock
 from .loader import AsyncBlockLoader
 from .selectors import AllBlocks, BlockSelector
@@ -27,18 +26,32 @@ class KVSSDPipeline:
         io_depth: int = 2,
         stage_blocks: int = 4,
         require_cuda_kernel: bool = False,
+        attention_backend: str | AttentionBackend | None = None,
     ):
         self.store = store
         self.device = torch.device(device)
         if self.device.type == "cuda" and not torch.cuda.is_available():
             raise RuntimeError("CUDA device requested but CUDA is unavailable")
-        self.loader = AsyncBlockLoader(store, depth=io_depth, pinned=self.device.type == "cuda")
+        self.loader = AsyncBlockLoader(
+            store,
+            depth=io_depth,
+            pinned=self.device.type == "cuda",
+            device=self.device,
+        )
         if stage_blocks < 1:
             raise ValueError("stage_blocks must be positive")
         self.stage_blocks = stage_blocks
         self.require_cuda_kernel = require_cuda_kernel
-        self.transfer_stream = torch.cuda.Stream(device=self.device) if self.device.type == "cuda" else None
-        self.compute_stream = torch.cuda.Stream(device=self.device) if self.device.type == "cuda" else None
+        if require_cuda_kernel and attention_backend not in (None, "auto", "cuda"):
+            raise ValueError("require_cuda_kernel conflicts with a non-CUDA attention backend")
+        requested_backend = "cuda" if require_cuda_kernel else attention_backend
+        self.attention_backend = resolve_attention_backend(requested_backend, self.device)
+        self.transfer_stream = (
+            torch.cuda.Stream(device=self.device) if self.device.type == "cuda" else None
+        )
+        self.compute_stream = (
+            torch.cuda.Stream(device=self.device) if self.device.type == "cuda" else None
+        )
 
     @staticmethod
     def _chunks(source: Iterator[PackedKVBlock], size: int) -> Iterator[list[PackedKVBlock]]:
@@ -51,12 +64,31 @@ class KVSSDPipeline:
         if chunk:
             yield chunk
 
-    def _stage(self, blocks: Sequence[PackedKVBlock]) -> tuple[tuple[torch.Tensor, ...], torch.cuda.Event]:
+    def _stage(
+        self, blocks: Sequence[PackedKVBlock]
+    ) -> tuple[tuple[torch.Tensor, ...], torch.cuda.Event]:
         """Coalesce a chunk in pinned memory and enqueue one non-blocking H2D transfer."""
         assert self.transfer_stream is not None
         first = blocks[0]
         count = len(blocks)
         spec = self.store.spec
+        if first.key.packed.device.type == "cuda":
+            with torch.cuda.stream(self.transfer_stream):
+                self.transfer_stream.wait_stream(torch.cuda.current_stream(self.device))
+                device_tensors = (
+                    torch.stack([block.key.packed for block in blocks]),
+                    torch.stack([block.value.packed for block in blocks]),
+                    torch.stack([block.key.scales for block in blocks]),
+                    torch.stack([block.value.scales for block in blocks]),
+                )
+                valid = torch.tensor(
+                    [block.valid_tokens for block in blocks],
+                    dtype=torch.int32,
+                    device=self.device,
+                )
+                event = torch.cuda.Event()
+                event.record(self.transfer_stream)
+            return (*device_tensors, valid), event
         shapes = (
             (count, spec.block_tokens, spec.kv_heads, spec.packed_dim),
             (count, spec.block_tokens, spec.kv_heads, spec.packed_dim),
@@ -105,8 +137,10 @@ class KVSSDPipeline:
             tensors, ready = current
             with torch.cuda.stream(self.compute_stream):
                 self.compute_stream.wait_event(ready)
-                out, lse = fused_attention_tensors(
-                    query, *tensors, self.store.spec.bits, self.store.spec.group_size, scale
+                out, lse = self.attention_backend.run(
+                    query,
+                    PackedBatch(*tensors, self.store.spec.bits, self.store.spec.group_size),
+                    scale,
                 )
                 for tensor in tensors:
                     tensor.record_stream(self.compute_stream)
@@ -141,7 +175,7 @@ class KVSSDPipeline:
         if not selected:
             raise ValueError("selector returned no blocks")
         query = query.to(self.device)
-        if self.device.type == "cuda" and cuda_extension_available():
+        if self.device.type == "cuda" and self.attention_backend.probe(self.device).accelerated:
             return self._decode_cuda_streamed(query, layer, selected)
         blocks = list(self.loader.iter_blocks(layer, selected))
         return packed_attention(
@@ -149,6 +183,7 @@ class KVSSDPipeline:
             blocks,
             sm_scale=1.0 / math.sqrt(query.shape[-1]),
             require_cuda_kernel=self.require_cuda_kernel,
+            attention_backend=self.attention_backend,
         )
 
     def close(self) -> None:

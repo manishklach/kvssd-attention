@@ -18,14 +18,22 @@ def test_packed_attention_matches_dequantized_reference(tmp_path: Path, bits: in
     store = KVCacheStore.create(tmp_path, keys, values, spec)
     blocks = [store.read(0, i) for i in store.blocks_for_layer(0)]
     actual = packed_attention(query, blocks)
-    dequant_k = torch.cat([
-        __import__("kvssd.quant", fromlist=["dequantize_tensor"]).dequantize_tensor(x.key)[:x.valid_tokens]
-        for x in blocks
-    ])
-    dequant_v = torch.cat([
-        __import__("kvssd.quant", fromlist=["dequantize_tensor"]).dequantize_tensor(x.value)[:x.valid_tokens]
-        for x in blocks
-    ])
+    dequant_k = torch.cat(
+        [
+            __import__("kvssd.quant", fromlist=["dequantize_tensor"]).dequantize_tensor(x.key)[
+                : x.valid_tokens
+            ]
+            for x in blocks
+        ]
+    )
+    dequant_v = torch.cat(
+        [
+            __import__("kvssd.quant", fromlist=["dequantize_tensor"]).dequantize_tensor(x.value)[
+                : x.valid_tokens
+            ]
+            for x in blocks
+        ]
+    )
     expected = reference_attention(query, dequant_k, dequant_v)
     torch.testing.assert_close(actual, expected)
 

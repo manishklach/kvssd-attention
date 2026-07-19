@@ -8,12 +8,14 @@ version = "0.1.1"
 description = "SSD-resident 2/4-bit KV cache with asynchronous staging and fused CUDA decode attention"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "Apache-2.0"}
+license = "Apache-2.0"
 authors = [{name = "KVSSD contributors"}]
 dependencies = ["numpy>=1.24", "torch>=2.4"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]
+triton = ["triton>=3.2; platform_system == 'Linux'"]
+vllm = ["vllm>=0.25,<0.26; platform_system == 'Linux'"]
 
 [project.scripts]
 kvssd = "kvssd.cli:main"
@@ -24,6 +26,11 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+markers = [
+  "triton_interpreter: exercises Triton kernels without physical GPU performance claims",
+  "gpu_hardware: requires an opted-in CUDA or ROCm hardware runner",
+  "gds_hardware: requires an opted-in NVIDIA GPUDirect Storage runner",
+]
 
 [tool.ruff]
 line-length = 100

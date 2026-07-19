@@ -71,4 +71,3 @@ def dequantize_tensor(q: QuantizedTensor, dtype: torch.dtype = torch.float32) ->
     groups = codes.reshape(*q.original_shape[:-1], -1, q.group_size)
     values = (groups - midpoint) * q.scales.float().unsqueeze(-1)
     return values.reshape(q.original_shape).to(dtype)
-

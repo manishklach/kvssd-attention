@@ -5,13 +5,9 @@ from collections.abc import Sequence
 
 import torch
 
+from .backends import AttentionBackend, PackedBatch, resolve_attention_backend
 from .format import PackedKVBlock
 from .quant import dequantize_tensor
-
-try:
-    from . import _C  # type: ignore[attr-defined]
-except ImportError:
-    _C = None
 
 
 def reference_attention(
@@ -65,7 +61,11 @@ def stack_blocks(blocks: Sequence[PackedKVBlock], device: torch.device) -> tuple
 
 
 def cuda_extension_available() -> bool:
-    return _C is not None
+    try:
+        resolve_attention_backend("cuda", torch.device("cuda"))
+        return True
+    except RuntimeError:
+        return False
 
 
 def fused_attention_tensors(
@@ -80,11 +80,11 @@ def fused_attention_tensors(
     sm_scale: float,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Low-level CUDA entry point returning normalized output and log-sum-exp statistics."""
-    if _C is None:
-        raise RuntimeError("KVSSD CUDA extension is not installed")
-    return _C.fused_decode(
-        query, packed_k, packed_v, scales_k, scales_v, valid_tokens,
-        bits, group_size, sm_scale,
+    backend = resolve_attention_backend("cuda", query.device)
+    return backend.run(
+        query,
+        PackedBatch(packed_k, packed_v, scales_k, scales_v, valid_tokens, bits, group_size),
+        sm_scale,
     )
 
 
@@ -96,10 +96,9 @@ def merge_attention_chunks(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Exactly merge independently normalized attention chunks using log normalizers."""
     merged_lse = torch.logaddexp(left_lse, right_lse)
-    merged_output = (
-        left_output * torch.exp(left_lse - merged_lse).unsqueeze(-1)
-        + right_output * torch.exp(right_lse - merged_lse).unsqueeze(-1)
-    )
+    merged_output = left_output * torch.exp(left_lse - merged_lse).unsqueeze(
+        -1
+    ) + right_output * torch.exp(right_lse - merged_lse).unsqueeze(-1)
     return merged_output, merged_lse
 
 
@@ -108,19 +107,28 @@ def packed_attention(
     blocks: Sequence[PackedKVBlock],
     sm_scale: float | None = None,
     require_cuda_kernel: bool = False,
+    attention_backend: str | AttentionBackend | None = None,
 ) -> torch.Tensor:
-    """Run the fused CUDA kernel when available, otherwise use the exact reference path."""
+    """Run packed attention through an explicit or automatically selected backend."""
+    if not blocks:
+        raise ValueError("at least one block is required")
     scale = sm_scale if sm_scale is not None else 1.0 / math.sqrt(query.shape[-1])
-    if query.is_cuda and _C is not None:
-        kp, vp, ks, vs, valid = stack_blocks(blocks, query.device)
-        bits = blocks[0].key.bits
-        group_size = blocks[0].key.group_size
-        output, _lse = fused_attention_tensors(
-            query, kp, vp, ks, vs, valid, bits, group_size, scale
-        )
-        return output.to(query.dtype)
-    if require_cuda_kernel:
-        raise RuntimeError(
-            "fused CUDA kernel unavailable; install with KVSSD_BUILD_CUDA=1 on a CUDA PyTorch build"
-        )
-    return packed_attention_reference(query, blocks, scale)
+    if require_cuda_kernel and attention_backend not in (None, "auto", "cuda"):
+        raise ValueError("require_cuda_kernel conflicts with a non-CUDA attention backend")
+    requested = "cuda" if require_cuda_kernel else attention_backend
+    backend = resolve_attention_backend(requested, query.device)
+    kp, vp, ks, vs, valid = stack_blocks(blocks, query.device)
+    output, _lse = backend.run(
+        query,
+        PackedBatch(
+            kp,
+            vp,
+            ks,
+            vs,
+            valid,
+            blocks[0].key.bits,
+            blocks[0].key.group_size,
+        ),
+        scale,
+    )
+    return output.to(query.dtype)

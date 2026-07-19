@@ -26,4 +26,3 @@ class RecentSinkBlocks:
             raise ValueError("sink and recent counts must be non-negative")
         chosen = available[: self.sink] + (available[-self.recent :] if self.recent else [])
         return list(dict.fromkeys(chosen))
-
