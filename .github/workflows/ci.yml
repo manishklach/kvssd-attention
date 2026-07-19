@@ -43,6 +43,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install --index-url https://download.pytorch.org/whl/cpu torch
+      - run: pip install numpy
       - run: pip install -e . --no-deps
       - run: python scripts/check_vllm_contract.py .vendor/vllm
       - run: python scripts/check_vllm_runtime_contract.py .vendor/vllm
