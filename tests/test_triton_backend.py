@@ -109,3 +109,33 @@ def test_triton_physical_gpu_matches_reference(bits: int) -> None:
     )
     torch.testing.assert_close(actual, expected, atol=2e-4, rtol=2e-4)
     torch.testing.assert_close(actual_lse, expected_lse, atol=2e-4, rtol=2e-4)
+
+
+@pytest.mark.gpu_hardware
+@pytest.mark.parametrize("bits", [2, 4])
+def test_cuda_extension_physical_gpu_matches_reference(bits: int) -> None:
+    if (
+        os.getenv("KVSSD_RUN_CUDA_EXTENSION_TESTS") != "1"
+        or not torch.cuda.is_available()
+        or torch.version.hip is not None
+    ):
+        pytest.skip("requires an opted-in NVIDIA CUDA-extension hardware runner")
+    query, cpu_batch = make_batch(bits, query_heads=4, kv_heads=2, head_dim=128)
+    device = torch.device("cuda")
+    batch = PackedBatch(
+        cpu_batch.packed_k.to(device),
+        cpu_batch.packed_v.to(device),
+        cpu_batch.scales_k.to(device),
+        cpu_batch.scales_v.to(device),
+        cpu_batch.valid_tokens.to(device),
+        bits,
+        cpu_batch.group_size,
+    )
+    query = query.to(device)
+    backend = resolve_attention_backend("cuda", device)
+    actual, actual_lse = backend.run(query, batch, 1 / query.shape[-1] ** 0.5)
+    expected, expected_lse = ReferenceAttentionBackend().run(
+        query, batch, 1 / query.shape[-1] ** 0.5
+    )
+    torch.testing.assert_close(actual, expected, atol=2e-4, rtol=2e-4)
+    torch.testing.assert_close(actual_lse, expected_lse, atol=2e-4, rtol=2e-4)

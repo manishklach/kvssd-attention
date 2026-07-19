@@ -1,19 +1,126 @@
 name: hardware-validation
+
 on:
   workflow_dispatch:
+    inputs:
+      nvidia_storage_root:
+        description: GDS-capable NVMe directory on the NVIDIA runner
+        required: true
+        default: /mnt/kvssd-validation
+        type: string
+      amd_work_root:
+        description: Scratch directory on the AMD runner
+        required: true
+        default: /tmp/kvssd-validation
+        type: string
+      benchmark_tokens:
+        description: Tokens per qualification benchmark
+        required: true
+        default: "8192"
+        type: string
+      benchmark_iterations:
+        description: Measured iterations per matrix entry
+        required: true
+        default: "10"
+        type: string
+      benchmark_warmup:
+        description: Warmup iterations per matrix entry
+        required: true
+        default: "2"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hardware-validation-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   nvidia-gds:
     runs-on: [self-hosted, linux, x64, nvidia-gds]
+    timeout-minutes: 90
+    env:
+      VALIDATION_ROOT: ${{ inputs.nvidia_storage_root }}/kvssd-${{ github.run_id }}-${{ github.run_attempt }}
+      RESULTS_DIR: ${{ github.workspace }}/qualification/nvidia-gds
     steps:
       - uses: actions/checkout@v4
-      - run: pip install -e '.[dev,triton]' --no-build-isolation
+      - name: Create isolated validation directories
+        run: mkdir -p "$VALIDATION_ROOT" "$RESULTS_DIR"
+      - name: Capture runner, GPU, and storage metadata
+        run: python3 scripts/collect_hardware_metadata.py --storage-root "$VALIDATION_ROOT" --output "$RESULTS_DIR/hardware-preflight.json"
+      - name: Build CUDA, GDS, and Triton backends
         env:
           KVSSD_BUILD_CUDA: "1"
           KVSSD_BUILD_GDS: "1"
-      - run: KVSSD_RUN_GPU_TESTS=1 KVSSD_RUN_GDS_TESTS=1 pytest -m 'gpu_hardware or gds_hardware'
+        run: python3 -m pip install -e '.[dev,triton]' --no-build-isolation
+      - name: Capture installed runtime metadata
+        run: python3 scripts/collect_hardware_metadata.py --storage-root "$VALIDATION_ROOT" --output "$RESULTS_DIR/runtime.json"
+      - name: Run numerical CUDA, Triton, and direct-GDS qualification
+        env:
+          KVSSD_RUN_GPU_TESTS: "1"
+          KVSSD_RUN_CUDA_EXTENSION_TESTS: "1"
+          KVSSD_RUN_GDS_TESTS: "1"
+        run: python3 -m pytest -m 'gpu_hardware or gds_hardware' --basetemp "$VALIDATION_ROOT/pytest" --junitxml "$RESULTS_DIR/pytest.xml"
+      - name: Run explicit GDS fused-attention matrix
+        run: >-
+          python3 benchmarks/run_matrix.py
+          --output "$RESULTS_DIR/benchmark.jsonl"
+          --work-dir "$VALIDATION_ROOT/benchmark"
+          --storage gds
+          --attention triton cuda
+          --bits 2 4
+          --tokens "${{ inputs.benchmark_tokens }}"
+          --iterations "${{ inputs.benchmark_iterations }}"
+          --warmup "${{ inputs.benchmark_warmup }}"
+      - name: Upload NVIDIA qualification evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nvidia-gds-qualification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: qualification/nvidia-gds
+          if-no-files-found: error
+          retention-days: 90
+
   amd-rocm:
     runs-on: [self-hosted, linux, x64, amd-rocm]
+    timeout-minutes: 90
+    env:
+      VALIDATION_ROOT: ${{ inputs.amd_work_root }}/kvssd-${{ github.run_id }}-${{ github.run_attempt }}
+      RESULTS_DIR: ${{ github.workspace }}/qualification/amd-rocm
     steps:
       - uses: actions/checkout@v4
-      - run: pip install -e '.[dev,triton]'
-      - run: KVSSD_RUN_GPU_TESTS=1 pytest -m gpu_hardware
+      - name: Create isolated validation directories
+        run: mkdir -p "$VALIDATION_ROOT" "$RESULTS_DIR"
+      - name: Capture runner, GPU, and storage metadata
+        run: python3 scripts/collect_hardware_metadata.py --storage-root "$VALIDATION_ROOT" --output "$RESULTS_DIR/hardware-preflight.json"
+      - name: Install Triton backend
+        run: |
+          python3 -m pip install pytest ruff
+          python3 -m pip install -e . --no-deps
+          python3 -c "import torch, triton; assert torch.version.hip, 'runner PyTorch is not a ROCm build'"
+      - name: Capture installed runtime metadata
+        run: python3 scripts/collect_hardware_metadata.py --storage-root "$VALIDATION_ROOT" --output "$RESULTS_DIR/runtime.json"
+      - name: Run portable Triton numerical qualification
+        env:
+          KVSSD_RUN_GPU_TESTS: "1"
+        run: python3 -m pytest -m gpu_hardware --basetemp "$VALIDATION_ROOT/pytest" --junitxml "$RESULTS_DIR/pytest.xml"
+      - name: Run ROCm Triton fused-attention matrix
+        run: >-
+          python3 benchmarks/run_matrix.py
+          --output "$RESULTS_DIR/benchmark.jsonl"
+          --work-dir "$VALIDATION_ROOT/benchmark"
+          --storage buffered
+          --attention triton
+          --bits 2 4
+          --tokens "${{ inputs.benchmark_tokens }}"
+          --iterations "${{ inputs.benchmark_iterations }}"
+          --warmup "${{ inputs.benchmark_warmup }}"
+      - name: Upload AMD qualification evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: amd-rocm-qualification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: qualification/amd-rocm
+          if-no-files-found: error
+          retention-days: 90

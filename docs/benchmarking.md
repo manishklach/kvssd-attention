@@ -17,6 +17,7 @@ For a backend/bit-width matrix, write one self-describing JSON object per line:
 ```bash
 python benchmarks/run_matrix.py \
   --output results/$(hostname)-$(date +%F).jsonl \
+  --work-dir /mnt/nvme/kvssd-validation \
   --storage auto gds direct buffered \
   --attention triton cuda \
   --bits 2 4
@@ -37,7 +38,10 @@ Systems, and PyTorch profiler traces to answer three separate questions:
 Compare at least FP16, INT8/FP8 where available, INT4, and INT2. Report model-task quality alongside
 throughput; a faster configuration with unacceptable retrieval or generation degradation is not a win.
 
-The manually dispatched hardware workflow is a qualification gate, not a performance benchmark. Use
-the matrix runner on the actual NVMe mount after qualification, retain the raw JSONL, and state whether
-GDS dynamic routing or the kernel driver handled the I/O. Never infer media bandwidth from a run whose
-selected storage backend is `buffered`.
+The manually dispatched hardware workflow is a qualification gate, not a performance claim. Its
+`nvidia_storage_root` input must name the GDS-capable NVMe mount; tests and matrix stores are created
+under a run-specific child directory. Each job uploads a 90-day artifact containing raw JUnit XML,
+benchmark JSONL, the tested commit, runner identity, GPU reports, filesystem and mount options, block
+devices, PCIe inventory, and NVMe inventory when the corresponding tools are installed. Retain the
+artifact with the release evidence and state whether GDS dynamic routing or the kernel driver handled
+the I/O. Never infer media bandwidth from a run whose selected storage backend is `buffered`.

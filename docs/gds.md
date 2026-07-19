@@ -41,15 +41,20 @@ identity. Use `auto` when fallback is desired.
 Portable CI tests probe capability and alignment without NVIDIA hardware. Hosted CI also builds and
 imports `kvssd._gds` against CUDA 12.8 and NVIDIA's real `libcufile-dev` headers; this is compile-only
 evidence and does not prove that DMA reached a GPU. The manually dispatched `hardware-validation`
-workflow requires a self-hosted runner labeled `nvidia-gds`; it builds both extensions, reads a
-complete record directly into CUDA memory, copies it back only for the test, and verifies the record
-CRC. A compile-only, queued, or absent hardware job is not evidence of working GDS I/O.
+workflow requires a self-hosted runner labeled `nvidia-gds` and an explicit `nvidia_storage_root` on
+the qualified NVMe filesystem. It builds both extensions, reads a complete record directly into CUDA
+memory, copies it back only for the test, verifies the record CRC, and runs explicit INT2/INT4 GDS
+matrices with both Triton and the CUDA extension. The uploaded artifact preserves raw JUnit,
+benchmark, GPU, filesystem, mount, PCIe, and NVMe evidence. A compile-only, queued, absent, or
+temporary-filesystem hardware job is not evidence of working GDS I/O.
 
 For host diagnostics, first run NVIDIA's `gdscheck -p`, then:
 
 ```bash
 kvssd inspect /mnt/gds/cache --storage-backend gds
 KVSSD_RUN_GDS_TESTS=1 pytest -m gds_hardware -q
+python benchmarks/run_matrix.py --output gds.jsonl --work-dir /mnt/gds/qualification \
+  --storage gds --attention triton cuda --bits 2 4
 ```
 
 The current record reader trusts manifest layout on the hot path. CRC verification is performed by

@@ -78,7 +78,10 @@ def _inspect(args: argparse.Namespace) -> None:
 
 def _benchmark(args: argparse.Namespace) -> None:
     device = "cuda" if torch.cuda.is_available() and not args.cpu else "cpu"
-    with tempfile.TemporaryDirectory() as tmp:
+    work_root = Path(args.work_dir).expanduser().resolve() if args.work_dir else None
+    if work_root is not None:
+        work_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=work_root) as tmp:
         spec = CacheSpec(
             1, args.kv_heads, args.head_dim, args.block_tokens, args.bits, args.group_size
         )
@@ -113,6 +116,7 @@ def _benchmark(args: argparse.Namespace) -> None:
             json.dumps(
                 {
                     "device": device,
+                    "work_root": str(work_root) if work_root is not None else None,
                     "runtime": _runtime_metadata(device),
                     "shape": {
                         "tokens": args.tokens,
@@ -168,6 +172,10 @@ def main() -> None:
     bench.add_argument("--require-cuda", action="store_true")
     bench.add_argument("--attention-backend", default="auto")
     bench.add_argument("--storage-backend", default="auto")
+    bench.add_argument(
+        "--work-dir",
+        help="parent directory for benchmark stores (use the qualified NVMe mount for GDS)",
+    )
     bench.set_defaults(func=_benchmark)
     args = parser.parse_args()
     args.func(args)

@@ -16,7 +16,7 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: pip install --index-url https://download.pytorch.org/whl/cpu torch
       - run: pip install -e '.[dev]'
-      - run: ruff check src tests
+      - run: ruff check src tests benchmarks scripts
       - run: pytest
       - run: pip wheel . --no-deps --wheel-dir dist
   triton-interpreter:

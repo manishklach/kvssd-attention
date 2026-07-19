@@ -18,6 +18,11 @@ def main() -> None:
     parser.add_argument("--attention", nargs="+", default=["triton"])
     parser.add_argument("--storage", nargs="+", default=["auto"])
     parser.add_argument("--bits", nargs="+", type=int, default=[2, 4])
+    parser.add_argument(
+        "--work-dir",
+        type=Path,
+        help="parent directory for temporary stores; required to target a specific NVMe mount",
+    )
     args = parser.parse_args()
 
     results = []
@@ -42,6 +47,8 @@ def main() -> None:
                     "--attention-backend",
                     attention,
                 ]
+                if args.work_dir is not None:
+                    command.extend(["--work-dir", str(args.work_dir)])
                 completed = subprocess.run(command, check=True, capture_output=True, text=True)
                 results.append(json.loads(completed.stdout))
     args.output.parent.mkdir(parents=True, exist_ok=True)
