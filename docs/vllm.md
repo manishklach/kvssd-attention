@@ -65,8 +65,10 @@ Because quantization is lossy, validate model/task qualityâ€”especially at INT2â
 ## Validation and prefix-reuse benchmark
 
 Portable tests cover codec corruption, hash/group mapping, and fake-runtime store/evict/reload. CI
-checks the integration contract against the exact `v0.25.0` vLLM source tag. A real serving benchmark
-still requires a supported GPU host:
+loads the actual base, secondary-tier, factory, and tiering-spec classes from the exact `v0.25.0`
+vLLM source tag, instantiates KVSSD against those abstract classes, and executes the lifecycle. The
+GPU-specific vLLM runtime remains stubbed, so a real serving benchmark still requires a supported GPU
+host:
 
 1. start the server with a clean KVSSD root;
 2. send the same long prompt twice with deterministic decoding;

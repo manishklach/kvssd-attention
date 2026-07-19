@@ -42,7 +42,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - run: pip install --index-url https://download.pytorch.org/whl/cpu torch
+      - run: pip install -e . --no-deps
       - run: python scripts/check_vllm_contract.py .vendor/vllm
+      - run: python scripts/check_vllm_runtime_contract.py .vendor/vllm
   gds-compile:
     runs-on: ubuntu-22.04
     container: nvidia/cuda:12.8.1-devel-ubuntu22.04
