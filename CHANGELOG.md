@@ -14,8 +14,8 @@ All notable project changes are documented here. The project follows Semantic Ve
 - Optional `libcufile` extension for aligned whole-record reads directly into CUDA memory.
 - vLLM 0.25 `TieringOffloadingSpec` integration with asynchronous packed prefix storage, stable
   hash/group mapping, atomic records, configuration isolation, and CRC-checked reloads.
-- Self-describing benchmark JSON, a matrix runner, source-contract CI for vLLM 0.25, and opt-in
-  NVIDIA GDS and AMD ROCm hardware workflows.
+- Self-describing benchmark JSON, a matrix runner, source-contract CI for vLLM 0.25, hosted cuFile
+  extension compilation, and opt-in NVIDIA GDS and AMD ROCm hardware workflows.
 
 ### Validation
 

@@ -43,3 +43,21 @@ jobs:
         with:
           python-version: "3.11"
       - run: python scripts/check_vllm_contract.py .vendor/vllm
+  gds-compile:
+    runs-on: ubuntu-22.04
+    container: nvidia/cuda:12.8.1-devel-ubuntu22.04
+    steps:
+      - name: Install build prerequisites and cuFile headers
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            git python3 python3-pip libcufile-dev-12-8
+      - uses: actions/checkout@v4
+      - name: Install CUDA-enabled PyTorch
+        run: python3 -m pip install --index-url https://download.pytorch.org/whl/cu128 torch
+      - name: Build and import the optional cuFile extension
+        env:
+          KVSSD_BUILD_GDS: "1"
+        run: |
+          python3 -m pip install . --no-build-isolation --no-deps -v
+          python3 -c "from kvssd import _gds; assert hasattr(_gds, 'GDSFile')"

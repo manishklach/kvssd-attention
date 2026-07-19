@@ -38,10 +38,12 @@ identity. Use `auto` when fallback is desired.
 
 ## Validation
 
-Portable CI tests probe capability and alignment without NVIDIA hardware. The manually dispatched
-`hardware-validation` workflow requires a self-hosted runner labeled `nvidia-gds`; it builds both
-extensions, reads a complete record directly into CUDA memory, copies it back only for the test, and
-verifies the record CRC. A queued or absent hardware job is not evidence of GDS support.
+Portable CI tests probe capability and alignment without NVIDIA hardware. Hosted CI also builds and
+imports `kvssd._gds` against CUDA 12.8 and NVIDIA's real `libcufile-dev` headers; this is compile-only
+evidence and does not prove that DMA reached a GPU. The manually dispatched `hardware-validation`
+workflow requires a self-hosted runner labeled `nvidia-gds`; it builds both extensions, reads a
+complete record directly into CUDA memory, copies it back only for the test, and verifies the record
+CRC. A compile-only, queued, or absent hardware job is not evidence of working GDS I/O.
 
 For host diagnostics, first run NVIDIA's `gdscheck -p`, then:
 
