@@ -32,7 +32,7 @@ storage to the GPU, and the CUDA kernel reconstructs individual values only when
 
 ## Project status
 
-`v0.1.0` is an engineering reference release. The portable correctness suite, storage lifecycle,
+`v0.1.1` is an engineering reference release. The portable correctness suite, storage lifecycle,
 packaging, and CPU end-to-end path are verified. The CUDA implementation is included and fails closed
 when unavailable, but its numerical and performance validation requires a real NVIDIA GPU. No GPU
 throughput claims are made from the AMD-only development host.

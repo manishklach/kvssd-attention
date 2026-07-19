@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kvssd-attention"
-version = "0.1.0"
+version = "0.1.1"
 description = "SSD-resident 2/4-bit KV cache with asynchronous staging and fused CUDA decode attention"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "Apache-2.0"}
 authors = [{name = "KVSSD contributors"}]
-dependencies = ["torch>=2.4"]
+dependencies = ["numpy>=1.24", "torch>=2.4"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]

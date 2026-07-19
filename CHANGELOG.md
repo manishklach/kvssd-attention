@@ -2,6 +2,20 @@
 
 All notable project changes are documented here. The project follows Semantic Versioning.
 
+## [0.1.1] - 2026-07-19
+
+### Fixed
+
+- Declared NumPy as a runtime dependency. The SSD codec uses NumPy-backed tensor buffer views for
+  serialization and direct reads; clean Linux installations previously failed with
+  `RuntimeError: Numpy is not available`.
+- Limited push-triggered CI runs to `main`, avoiding redundant workflow executions for release tags.
+
+### Validation
+
+- 12 portable tests pass with the corrected dependency set.
+- Ruff and wheel packaging pass.
+
 ## [0.1.0] - 2026-07-19
 
 ### Added
@@ -26,5 +40,5 @@ All notable project changes are documented here. The project follows Semantic Ve
 - Python wheel and source distribution build successfully.
 - The CUDA runtime path remains to be validated on physical NVIDIA hardware.
 
+[0.1.1]: https://github.com/manishklach/kvssd-attention/releases/tag/v0.1.1
 [0.1.0]: https://github.com/manishklach/kvssd-attention/releases/tag/v0.1.0
-
