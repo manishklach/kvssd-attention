@@ -96,7 +96,8 @@ kvssd benchmark --storage-backend gds --attention-backend triton
 
 For qualification, point `--work-dir` at the actual NVMe mount. The opt-in hardware workflow requires
 an explicit NVIDIA storage root, runs every GDS test and benchmark there, and uploads raw JUnit,
-benchmark JSONL, GPU, filesystem, mount, and device-topology evidence for both hardware jobs.
+benchmark JSONL, GPU, filesystem, mount, and device-topology evidence for both hardware jobs. The
+NVIDIA job also launches vLLM 0.25 twice and requires an external KVSSD prefix hit after restart.
 
 See [docs/gds.md](docs/gds.md) for setup and diagnostics and
 [docs/vllm.md](docs/vllm.md) for the vLLM proof-of-concept configuration.

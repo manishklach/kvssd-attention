@@ -42,6 +42,8 @@ The manually dispatched hardware workflow is a qualification gate, not a perform
 `nvidia_storage_root` input must name the GDS-capable NVMe mount; tests and matrix stores are created
 under a run-specific child directory. Each job uploads a 90-day artifact containing raw JUnit XML,
 benchmark JSONL, the tested commit, runner identity, GPU reports, filesystem and mount options, block
-devices, PCIe inventory, and NVMe inventory when the corresponding tools are installed. Retain the
-artifact with the release evidence and state whether GDS dynamic routing or the kernel driver handled
-the I/O. Never infer media bandwidth from a run whose selected storage backend is `buffered`.
+devices, PCIe inventory, and NVMe inventory when the corresponding tools are installed. The NVIDIA
+artifact also contains the vLLM populate/reload server logs, Prometheus snapshots, per-request TTFT,
+cached-token counts, record bytes, and the external-prefix-hit delta across a server restart. Retain
+the artifact with the release evidence and state whether GDS dynamic routing or the kernel driver
+handled the I/O. Never infer media bandwidth from a run whose selected storage backend is `buffered`.

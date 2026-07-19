@@ -38,7 +38,10 @@ jobs:
           repository: vllm-project/vllm
           ref: v0.25.0
           path: .vendor/vllm
-          sparse-checkout: vllm/v1/kv_offload
+          sparse-checkout: |
+            vllm/v1/kv_offload
+            vllm/v1/metrics
+            vllm/entrypoints/openai/completion
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"

@@ -39,6 +39,18 @@ def main() -> None:
     assert any(
         isinstance(base, ast.Name) and base.id == "CPUOffloadingSpec" for base in node.bases
     ), "TieringOffloadingSpec no longer extends CPUOffloadingSpec"
+    metrics = (args.vllm_source / "vllm" / "v1" / "metrics" / "loggers.py").read_text(
+        encoding="utf-8"
+    )
+    assert "vllm:external_prefix_cache_hits" in metrics, (
+        "external prefix cache hit metric changed"
+    )
+    completion = (
+        args.vllm_source / "vllm" / "entrypoints" / "openai" / "completion" / "serving.py"
+    ).read_text(encoding="utf-8")
+    assert "prompt_tokens_details" in completion and "num_cached_tokens" in completion, (
+        "completion cached-token reporting contract changed"
+    )
     print("vLLM source contract is compatible")
 
 

@@ -28,6 +28,21 @@ on:
         required: true
         default: "2"
         type: string
+      vllm_model:
+        description: Public model ID or runner-local model path for persistent prefix qualification
+        required: true
+        default: facebook/opt-125m
+        type: string
+      vllm_gpu_memory_utilization:
+        description: GPU memory fraction for the vLLM qualification server
+        required: true
+        default: "0.5"
+        type: string
+      vllm_cpu_bytes:
+        description: CPU-primary bytes; keep small enough to force secondary-tier eviction
+        required: true
+        default: "67108864"
+        type: string
 
 permissions:
   contents: read
@@ -39,10 +54,11 @@ concurrency:
 jobs:
   nvidia-gds:
     runs-on: [self-hosted, linux, x64, nvidia-gds]
-    timeout-minutes: 90
+    timeout-minutes: 150
     env:
       VALIDATION_ROOT: ${{ inputs.nvidia_storage_root }}/kvssd-${{ github.run_id }}-${{ github.run_attempt }}
       RESULTS_DIR: ${{ github.workspace }}/qualification/nvidia-gds
+      VLLM_VENV: ${{ inputs.nvidia_storage_root }}/kvssd-${{ github.run_id }}-${{ github.run_attempt }}/vllm-venv
     steps:
       - uses: actions/checkout@v4
       - name: Create isolated validation directories
@@ -73,6 +89,20 @@ jobs:
           --tokens "${{ inputs.benchmark_tokens }}"
           --iterations "${{ inputs.benchmark_iterations }}"
           --warmup "${{ inputs.benchmark_warmup }}"
+      - name: Install pinned vLLM in an isolated qualification environment
+        run: |
+          python3 -m venv "$VLLM_VENV"
+          "$VLLM_VENV/bin/python" -m pip install 'vllm==0.25.0'
+          "$VLLM_VENV/bin/python" -m pip install -e . --no-deps
+      - name: Qualify persistent vLLM prefix reuse across a server restart
+        run: >-
+          "$VLLM_VENV/bin/python" benchmarks/vllm_prefix_reuse.py
+          --model "${{ inputs.vllm_model }}"
+          --root "$VALIDATION_ROOT/vllm"
+          --output "$RESULTS_DIR/vllm-prefix-reuse.json"
+          --artifact-dir "$RESULTS_DIR"
+          --gpu-memory-utilization "${{ inputs.vllm_gpu_memory_utilization }}"
+          --cpu-bytes "${{ inputs.vllm_cpu_bytes }}"
       - name: Upload NVIDIA qualification evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@v4

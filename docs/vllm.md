@@ -64,17 +64,36 @@ Because quantization is lossy, validate model/task quality—especially at INT2�
 
 ## Validation and prefix-reuse benchmark
 
-Portable tests cover codec corruption, hash/group mapping, and fake-runtime store/evict/reload. CI
-loads the actual base, secondary-tier, factory, and tiering-spec classes from the exact `v0.25.0`
-vLLM source tag, instantiates KVSSD against those abstract classes, and executes the lifecycle. The
-GPU-specific vLLM runtime remains stubbed, so a real serving benchmark still requires a supported GPU
-host:
+Portable tests cover codec corruption, hash/group mapping, fake-runtime store/evict/reload, and the
+streaming benchmark client. CI loads the actual base, secondary-tier, factory, and tiering-spec
+classes from the exact `v0.25.0` source tag, instantiates KVSSD against those abstract classes, and
+executes the lifecycle.
 
-1. start the server with a clean KVSSD root;
-2. send the same long prompt twice with deterministic decoding;
-3. record first-token latency, cache-hit metrics, record bytes, and task output for each request;
-4. restart the server and repeat to demonstrate persistent reuse;
-5. compare against vLLM's built-in `fs` secondary tier using identical CPU bytes and thread counts.
+The physical NVIDIA workflow runs the serving qualification automatically. It launches vLLM 0.25,
+sends a cold and warm target prompt plus distinct prompts that exercise CPU-primary eviction pressure,
+waits for stable secondary-tier `.kvssd` records, restarts the server, and sends the target again.
+The gate requires both `prompt_tokens_details.cached_tokens > 0` and an increase in vLLM's
+`external_prefix_cache_hits` counter after restart. This distinguishes persistent secondary-tier reuse
+from an in-process local prefix hit. The benchmark explicitly sets vLLM's KV-load policy to `fail`, so
+a corrupt or failed reload cannot silently recompute and pass. Raw JSON, Prometheus snapshots, and
+both server logs are retained.
+vLLM is installed in a dedicated virtual environment so its pinned PyTorch/Triton dependencies cannot
+replace the environment used to build and qualify the CUDA and cuFile extensions.
+
+Run the same qualification manually with a public model ID or local model path:
+
+```bash
+python benchmarks/vllm_prefix_reuse.py \
+  --model facebook/opt-125m \
+  --root /mnt/nvme/vllm-kvssd-qualification \
+  --output results/vllm-prefix-reuse.json \
+  --artifact-dir results/vllm-logs \
+  --cpu-bytes 67108864
+```
+
+Use a new empty root for every qualification. For a comparative performance study, run the same
+prompt sequence against vLLM's built-in `fs` tier with identical CPU bytes and thread counts; the
+release gate proves lifecycle correctness and persistent reuse, not a universal speedup.
 
 Do not describe the result as direct GDS unless the standalone GDS/fused pipeline—not this staged
 vLLM adapter—was actually measured.
